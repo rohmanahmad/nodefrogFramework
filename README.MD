@@ -118,36 +118,65 @@ POST /:model/aggregate   : run aggregate on current model
 ```
 
 #### [POST] /:model/updateOne
-->  digunakan untuk mengubah nilai satu data dari suatu collection dengan menambahkan body(data[object.criteria & object.update]) secara spesifik
+->  digunakan untuk mengubah nilai satu data dari suatu collection dengan menambahkan body(data[object]) dengan query objectId(required) & upsert(optional|yes/no) secara spesifik
 ```js
 - example body 1
 {
-    criteria: {
-        username: 'test1'
-    },
-    update: {
-        fullname: 'user change 1',
-        ...
-    }
+    fullname: 'user change 1',
+    password: 'secretpasswordnew'
+    ...
 }
 ```
 
 #### [POST] /:model/updateMany
 ->  digunakan untuk mengubah nilai satu/lebih data dari suatu collection dengan menambahkan body(data[object.criteria & object.update]) secara spesifik
 ```js
+{
+    criteria: {
+        username: 'testing1'
+    },
+    update: {
+        fullname: 'user change 1',
+        password: 'secretpasswordnew'
+        ...
+    }
+}
 ```
 
 #### [POST] /:model/deleteOne
-->  digunakan untuk menghapus satu data dari suatu collection dengan menambahkan body(data[object.criteria & object.update]) secara spesifik
+->  digunakan untuk menghapus satu data dari suatu collection dengan menambahkan query objectId(required) & upsert(optional|yes/no) secara spesifik
 ```js
+// no body required
 ```
 
 #### [POST] /:model/deleteMany
-->  digunakan untuk menghapus satu/lebih data dari suatu collection dengan menambahkan body(data[object.criteria & object.update]) secara spesifik
+->  digunakan untuk menghapus satu/lebih data dari suatu collection dengan menambahkan body(object) secara spesifik
 ```js
+{
+    username: 'testing1'
+}
 ```
 
 #### [POST] /:model/aggregate
 ->  digunakan untuk membuat fungsi aggregate dari suatu collection dengan menambahkan body(object) secara spesifik
 ```js
+[
+    {
+        $match: {
+            username: 'testing1'
+        }
+    },
+    {
+        $projection: {
+            username: true
+        }
+    },
+    {
+        $limit: 1
+    },
+    {
+        $skip: 1
+    },
+    ...
+]
 ```
