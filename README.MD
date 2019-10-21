@@ -8,7 +8,7 @@ Nodefrog Framework adalah sebuah API framework untuk manajemen mongodb data. Den
 
 ### Instalasi Nodefrog Framework
 
-```
+```bash
 $ git clone https://github.com/rohmanahmad/nodefrogFramework
 $ cd nodefrogFramework
 $ npm install
@@ -19,7 +19,7 @@ $ npm run start
 ### Cara Konfigurasi Mongodb connection & Models pada config.js
 
 * buka config.js maka akan terlihat seperti dibawah ini
-```
+```js
 module.exports = {
     db: {
         mongo: 'mongodb://HOST:PORT/YOUR_DB_NAME'
@@ -37,7 +37,7 @@ module.exports = {
 ```
 
 * pada bagian db.mongo ubah sesuai dengan connection URI pada masing-masing server mongo. contoh:
-```
+```js
 module.exports = {
     db: {
         mongo: 'mongodb://localhost:27017/nodefrogframework'
