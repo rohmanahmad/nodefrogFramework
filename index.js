@@ -2,21 +2,88 @@
 
 const express = require('express')
 const bodyParser = require('body-parser')
+const crypto = require('crypto')
 const app = express()
 const mongoose = require('mongoose')
 const Schema = mongoose.Schema
-const { models, db } = require('./config')
-
-// app.use(express.json()) // json parser
-// app.use(express.urlencoded({ extended: true })) // for parsing application/x-www-form-urlencoded
+const { app: { port }, factory, models, db, app: { encryption: { type, key }, session: { exp } } } = require('./config')
+const documentation = require('./documentation')
+app.disable('x-powered-by') // remove default header x-powered-by
+app.use(express.json()) // json parser
+app.use(express.urlencoded({ extended: true })) // for parsing application/x-www-form-urlencoded
+app.use(express.static(__dirname + '/swagger'))
 app.use(bodyParser.json())
+
+// set custom header
+app.use(function (req, res, next) {
+    res.setHeader('x-powered-by', 'NodeFrog Framework')
+    next()
+})
+// session
+const sessionNumber = parseInt(exp)
+let sessionLong = 60 // default menit
+if (exp.indexOf('s') > -1) sessionLong = 1
+else if (exp.indexOf('m') > -1) sessionLong = 60
+else if (exp.indexOf('h') > -1) sessionLong = 60 * 60
+else if (exp.indexOf('d') > -1) sessionLong = 60 * 60 * 24
+
+const sessionExp = sessionNumber * sessionLong
+
+// end session
 
 const debug = true
 
+class Hash {
+    des (data) {
+        try {
+            const cipher = crypto.createCipher('des-ede3', key)
+            let encrypted = cipher.update(data, 'utf8', 'hex')
+            encrypted += cipher.final('hex')
+            return encrypted
+        } catch (err) {
+            throw err
+        }
+    }
+    encode (data) {
+        try {
+            const cipher = crypto.createCipher(type, key)
+            let encrypted = cipher.update(data, 'utf8', 'hex')
+            encrypted += cipher.final('hex')
+            return encrypted
+        } catch (err) {
+            throw err
+        }
+    }
+    decode (encrytpedString = '') {
+        try {
+            const decipher = crypto.createDecipher(type, key)
+            let decrypted = decipher.update(encrytpedString, 'hex', 'utf8')
+            decrypted += decipher.final('utf8')
+            return decrypted
+        } catch (err) {
+            throw err
+        }
+    }
+}
+
 class ModelControls {
+    getFormatSchema (sc) {
+        let schema = {}
+        for (let s in sc) {
+            let type = String
+            if (sc[s] === '<number>') type = Number
+            if (sc[s] === '<objectId>') type = mongoose.Types.ObjectId
+            schema[s] = type
+        }
+        return schema
+    }
     register () {
         for (let m in models) {
-            const sch = new Schema(models[m])
+            const sch = new Schema(this.getFormatSchema(models[m]['schema']))
+            mongoose.model(m, sch, m.toLowerCase())
+        }
+        for (let m in factory.models) {
+            const sch = new Schema(this.getFormatSchema(factory.models[m]['schema']))
             mongoose.model(m, sch, m.toLowerCase())
         }
     }
@@ -38,8 +105,10 @@ class Database extends ModelControls {
         mongoose.connection
             .on('error', (err) => console.error(err))
             .on('disconnected', e => {
-                console.log('mongo disconnected!')
-                this.connect()
+                console.log('mongo disconnected & reconnecting in 10s...')
+                setTimeout(() => {
+                    this.connect()
+                }, 10 * 1000)
             })
             .on('close', e => {
                 console.log('mongo closed!')
@@ -52,11 +121,19 @@ class Database extends ModelControls {
     }
 }
 
+const modelMapping = {
+    users: 'Users',
+    accounts: 'Accounts',
+    categories: 'Categories',
+    transaction: 'Transaction'
+}
 function model (m) {
+    m = modelMapping[m]
     const models = mongoose.models
     if (models[m]) return models[m]
     throw 'Model Not Found'
 }
+
 function validateQueries (queries = {}) {
     let valid = {}
     let {limit, page, objectId, upsert} = queries
@@ -84,12 +161,65 @@ function validateQueries (queries = {}) {
     }
     return valid
 }
+
+function authentication (req, res, next) {
+    try {
+        console.log(req.header('api_key'))
+        next()
+    } catch (err) {
+        res.status(402).send({
+            statusCode: 402,
+            message: 'Bad Auth Token!',
+            error: err.message
+        })
+    }
+}
+
 class Controllers {
+    async login (req, res, next) {
+        try {
+            const error = 'Invalid Username or Password'
+            let { username, password } = req.body
+            if (!username || (username && username.length === '')) throw new Error(error)
+            const m = model('users')
+            let information = await m.findOne({
+                username,
+                status: 1
+            })
+            if (!information) throw new Error(error)
+            if (password !== new Hash().decode(information.password)) throw new Error(error)
+            const ttl = new Date().getTime() + sessionExp
+            res.send({
+                statusCode: 200,
+                data: {
+                    token: new Hash().des(
+                        JSON.stringify({
+                            username: information.username,
+                            ttl
+                        })
+                    ).toUpperCase(),
+                    expired: ttl,
+                    basicInformation: {
+                        id: (information._id.toString()).toUpperCase(),
+                        fullname: information.fullname
+                    }
+                }
+            })
+        } catch (err) {
+            console.log(err)
+            res.status(400).send({
+                statusCode: 400,
+                message: 'bad request',
+                error: err.message || err
+            })
+        }
+    }
     async find (req, res, next) {
         try {
+            const mdl = Object.keys(req.params)[0]
             let {limit, skip, page} = validateQueries(req.query)
             const query = req.body || {}
-            const m = model(req.params['model'])
+            const m = model(req.params[mdl])
             const items = await m.find(query).skip(skip).limit(limit)
             res.send({ statusCode: 200, config: {limit, page, query}, items })
         } catch (err) {
@@ -104,7 +234,8 @@ class Controllers {
         try {
             let {limit, skip, page} = validateQueries(req.query)
             const query = req.body || {}
-            const m = model(req.params['model'])
+            const mdl = Object.keys(req.params)[0]
+            const m = model(req.params[mdl])
             const item = await m.findOne(query).skip(skip).limit(limit)
             res.send({ statusCode: 200, config: {limit, page, query}, item })
         } catch (err) {
@@ -118,7 +249,8 @@ class Controllers {
     async create (req, res, next) {
         try {
             const data = req.body || {}
-            const m = model(req.params['model'])
+            const mdl = Object.keys(req.params)[0]
+            const m = model(req.params[mdl])
             let item = null
             if (data && data[0]) {
                 item = await m.insertMany(data)
@@ -138,7 +270,8 @@ class Controllers {
         try {
             let { objectId, upsert } = validateQueries(req.query)
             const data = req.body || {}
-            const m = model(req.params['model'])
+            const mdl = Object.keys(req.params)[0]
+            const m = model(req.params[mdl])
             let item = null
             item = await m.updateOne({_id: objectId}, data, { upsert: upsert || false })
             res.send({ statusCode: 200, config: {data}, item })
@@ -154,7 +287,8 @@ class Controllers {
         try {
             let { upsert } = validateQueries(req.query)
             const {criteria, update} = req.body || {}
-            const m = model(req.params['model'])
+            const mdl = Object.keys(req.params)[0]
+            const m = model(req.params[mdl])
             let item = null
             if (!criteria) throw 'Need Criteria Object!'
             if (!update) throw 'Need Update Object!'
@@ -175,7 +309,8 @@ class Controllers {
             let {objectId} = validateQueries(req.query)
             const query = objectId ? {_id: objectId} : req.body
             if (Object.keys(query).length === 0) throw 'Need Body Object or objectId(query)'
-            const m = model(req.params['model'])
+            const mdl = Object.keys(req.params)[0]
+            const m = model(req.params[mdl])
             const items = await m.deleteOne(query)
             res.send({ statusCode: 200, config: {query}, items })
         } catch (err) {
@@ -190,7 +325,8 @@ class Controllers {
         try {
             const query = req.body
             if (Object.keys(query).length === 0) throw 'Need Body Object or objectId(query)'
-            const m = model(req.params['model'])
+            const mdl = Object.keys(req.params)[0]
+            const m = model(req.params[mdl])
             const items = await m.deleteMany(query)
             res.send({ statusCode: 200, config: {query}, items })
         } catch (err) {
@@ -206,7 +342,8 @@ class Controllers {
             const aggregate = req.body
             if (Object.keys(aggregate).length === 0) throw 'Need Aggregate(Body Object Array)'
             if (!aggregate[0]) throw 'Aggregate need Array Object'
-            const m = model(req.params['model'])
+            const mdl = Object.keys(req.params)[0]
+            const m = model(req.params[mdl])
             const items = await m.aggregate(aggregate)
             res.send({ statusCode: 200, config: {aggregate}, items })
         } catch (err) {
@@ -217,6 +354,11 @@ class Controllers {
             })
         }
     }
+}
+
+function passAuth (req, res, next) {
+    console.log('|.. passing authentication')
+    next()
 }
 
 class Server {
@@ -240,14 +382,50 @@ class Server {
             console.log(`|.. ${req.method}`, req.originalUrl, (debug ? JSON.stringify(req.body || {}) : ''))
             next()
         })
-        app.post('/:model/find', c.find)
-        app.post('/:model/findOne', c.findOne)
-        app.post('/:model/create', c.create)
-        app.post('/:model/updateOne', c.updateOne)
-        app.post('/:model/updateMany', c.updateMany)
-        app.post('/:model/deleteOne', c.deleteOne)
-        app.post('/:model/deleteMany', c.deleteMany)
-        app.post('/:model/aggregate', c.aggregate)
+        app.get('/', function (req, res) {
+            res.send({})
+        })
+        app.get('/docs', function (req, res) {
+            res.send(documentation.view)
+        })
+        app.get('/swagger.json', function (req, res) {
+            res.send(documentation.paths)
+        })
+        app.post('/authentication/login', c.login)
+        const allModels = {...factory.models, ...models}
+        let index = 1
+        for (let m in allModels) {
+            if (allModels[m]['api']) {
+                const authRoutes = allModels[m]['auth']['routes']
+                const paths = allModels[m]['paths']
+                let authfind = (authRoutes.indexOf('find') > -1) ? authentication : passAuth
+                let authfindOne = (authRoutes.indexOf('findOne') > -1) ? authentication : passAuth
+                let authcreate = (authRoutes.indexOf('create') > -1) ? authentication : passAuth
+                let authupdateOne = (authRoutes.indexOf('updateOne') > -1) ? authentication : passAuth
+                let authupdateMany = (authRoutes.indexOf('updateMany') > -1) ? authentication : passAuth
+                let authdeleteOne = (authRoutes.indexOf('deleteOne') > -1) ? authentication : passAuth
+                let authdeleteMany = (authRoutes.indexOf('deleteMany') > -1) ? authentication : passAuth
+                let authaggregate = (authRoutes.indexOf('aggregate') > -1) ? authentication : passAuth
+
+                if (paths.indexOf('find') > -1) app.post(`/:${ m.toLowerCase() }/find`, [authfind, c.find])
+                if (paths.indexOf('findOne') > -1) app.post(`/:${ m.toLowerCase() }/findOne`, [authfindOne, c.findOne])
+                if (paths.indexOf('create') > -1) app.post(`/:${ m.toLowerCase() }/create`, [authcreate, c.create])
+                if (paths.indexOf('updateOne') > -1) app.post(`/:${ m.toLowerCase() }/updateOne`, [authupdateOne, c.updateOne])
+                if (paths.indexOf('updateMany') > -1) app.post(`/:${ m.toLowerCase() }/updateMany`, [authupdateMany, c.updateMany])
+                if (paths.indexOf('deleteOne') > -1) app.post(`/:${ m.toLowerCase() }/deleteOne`, [authdeleteOne, c.deleteOne])
+                if (paths.indexOf('deleteMany') > -1) app.post(`/:${ m.toLowerCase() }/deleteMany`, [authdeleteMany, c.deleteMany])
+                if (paths.indexOf('aggregate') > -1) app.post(`/:${ m.toLowerCase() }/aggregate`, [authaggregate, c.aggregate])
+
+                console.log(`|. registering route: (#${index})`, m.toLowerCase())
+            }
+            index += 1
+        }
+        app.all('*', function (req, res, next) {
+            res.status(404).send({
+                statusCode: 404,
+                message: 'Not Found'
+            })
+        })
         return this
     }
     start () {
@@ -262,7 +440,7 @@ class Server {
 
 new Server()
     .init()
-    .port(3000)
+    .port(port || 3000)
     .theme('default')
     .routes()
     .start()
