@@ -1,13 +1,17 @@
 {
-  "name": "blogs",
+  "name": "nodefrog-framework-api",
   "version": "1.0.0",
   "description": "nodejs blogs",
   "main": "index.js",
   "scripts": {
-    "start": "nodemon -w -x node index.js",
+    "start": "nodemon --watch index.js --watch documentation.js --watch config.js --watch package.json -x node index.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "author": "rohmanahmad",
+  "contacts": {
+    "email": "rohmanmail@gmail.com",
+    "website": "https://rohman.web.id"
+  },
   "license": "ISC",
   "dependencies": {
     "body-parser": "^1.19.0",
