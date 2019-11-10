@@ -6,7 +6,7 @@ const crypto = require('crypto')
 const app = express()
 const mongoose = require('mongoose')
 const Schema = mongoose.Schema
-const { app: { port }, factory, models, db, app: { encryption: { type, key }, session: { exp } } } = require('./config')
+const { app: { port, debug }, factory, models, db, app: { encryption: { type, key }, session: { exp } } } = require('./config')
 const documentation = require('./documentation')
 app.disable('x-powered-by') // remove default header x-powered-by
 app.use(express.json()) // json parser
@@ -19,7 +19,8 @@ app.use(function (req, res, next) {
     res.setHeader('x-powered-by', 'NodeFrog Framework')
     next()
 })
-// session
+
+// session config
 const sessionNumber = parseInt(exp)
 let sessionLong = 60 // default menit
 if (exp.indexOf('s') > -1) sessionLong = 1
@@ -28,11 +29,14 @@ else if (exp.indexOf('h') > -1) sessionLong = 60 * 60
 else if (exp.indexOf('d') > -1) sessionLong = 60 * 60 * 24
 
 const sessionExp = sessionNumber * sessionLong
-
 // end session
 
-const debug = true
-
+function debuglog (...data) {
+    if (['E_ALL', 'E_ERR'].indexOf(debug) > -1) console.log(...data)
+}
+function errorlog (...data) {
+    if (['E_ALL', 'E_ERR'].indexOf(debug) > -1) console.error(...data)
+}
 class Hash {
     des (data) {
         try {
@@ -98,25 +102,25 @@ class Database extends ModelControls {
         if (!db.mongo) throw 'Invalid Mongodb URI Config!'
         mongoose
             .connect(db.mongo, { keepAlive: 1, useNewUrlParser: true, useUnifiedTopology: true })
-            .catch(console.error)
+            .catch(errorlog)
     }
     checkConnection () {
         if (mongoose.connection.readyState === 0) this.connect()
         mongoose.connection
-            .on('error', (err) => console.error(err))
+            .on('error', (err) => errorlog(err))
             .on('disconnected', e => {
-                console.log('mongo disconnected & reconnecting in 10s...')
+                debuglog('mongo disconnected & reconnecting in 10s...')
                 setTimeout(() => {
                     this.connect()
                 }, 10 * 1000)
             })
             .on('close', e => {
-                console.log('mongo closed!')
+                debuglog('mongo closed!')
                 this.connect()
             })
             .on('connected', () => {
                 this.register()
-                console.log('|. mongodb connected')
+                debuglog('|. mongodb connected')
             })
     }
 }
@@ -164,7 +168,7 @@ function validateQueries (queries = {}) {
 
 function authentication (req, res, next) {
     try {
-        console.log(req.header('api_key'))
+        debuglog(req.header('api_key'))
         next()
     } catch (err) {
         res.status(402).send({
@@ -206,7 +210,7 @@ class Controllers {
                 }
             })
         } catch (err) {
-            console.log(err)
+            errorlog(err)
             res.status(400).send({
                 statusCode: 400,
                 message: 'bad request',
@@ -357,7 +361,7 @@ class Controllers {
 }
 
 function passAuth (req, res, next) {
-    console.log('|.. passing authentication')
+    debuglog('|.. passing authentication')
     next()
 }
 
@@ -379,7 +383,7 @@ class Server {
     routes () {
         const c = new Controllers()
         app.use((req, res, next) => {
-            console.log(`|.. ${req.method}`, req.originalUrl, (debug ? JSON.stringify(req.body || {}) : ''))
+            debuglog(`|.. ${req.method}`, req.originalUrl, (debug ? JSON.stringify(req.body || {}) : ''))
             next()
         })
         app.get('/', function (req, res) {
@@ -396,6 +400,8 @@ class Server {
         let index = 1
         for (let m in allModels) {
             if (allModels[m]['api']) {
+                debuglog(`|. registering route: (#${index})`, m.toLowerCase())
+
                 const authRoutes = allModels[m]['auth']['routes']
                 const paths = allModels[m]['paths']
                 let authfind = (authRoutes.indexOf('find') > -1) ? authentication : passAuth
@@ -407,16 +413,38 @@ class Server {
                 let authdeleteMany = (authRoutes.indexOf('deleteMany') > -1) ? authentication : passAuth
                 let authaggregate = (authRoutes.indexOf('aggregate') > -1) ? authentication : passAuth
 
-                if (paths.indexOf('find') > -1) app.post(`/:${ m.toLowerCase() }/find`, [authfind, c.find])
-                if (paths.indexOf('findOne') > -1) app.post(`/:${ m.toLowerCase() }/findOne`, [authfindOne, c.findOne])
-                if (paths.indexOf('create') > -1) app.post(`/:${ m.toLowerCase() }/create`, [authcreate, c.create])
-                if (paths.indexOf('updateOne') > -1) app.post(`/:${ m.toLowerCase() }/updateOne`, [authupdateOne, c.updateOne])
-                if (paths.indexOf('updateMany') > -1) app.post(`/:${ m.toLowerCase() }/updateMany`, [authupdateMany, c.updateMany])
-                if (paths.indexOf('deleteOne') > -1) app.post(`/:${ m.toLowerCase() }/deleteOne`, [authdeleteOne, c.deleteOne])
-                if (paths.indexOf('deleteMany') > -1) app.post(`/:${ m.toLowerCase() }/deleteMany`, [authdeleteMany, c.deleteMany])
-                if (paths.indexOf('aggregate') > -1) app.post(`/:${ m.toLowerCase() }/aggregate`, [authaggregate, c.aggregate])
-
-                console.log(`|. registering route: (#${index})`, m.toLowerCase())
+                if (paths.indexOf('find') > -1) {
+                    debuglog(`|... /:${ m.toLowerCase() }/findOne`)
+                    app.post(`/:${ m.toLowerCase() }/find`, [authfind, c.find])
+                }
+                if (paths.indexOf('findOne') > -1) {
+                    app.post(`/:${ m.toLowerCase() }/findOne`, [authfindOne, c.findOne])
+                    debuglog(`|... /:${ m.toLowerCase() }/findOne`)
+                }
+                if (paths.indexOf('create') > -1) {
+                    app.post(`/:${ m.toLowerCase() }/create`, [authcreate, c.create])
+                    debuglog(`|... /:${ m.toLowerCase() }/create`)
+                }
+                if (paths.indexOf('updateOne') > -1) {
+                    app.post(`/:${ m.toLowerCase() }/updateOne`, [authupdateOne, c.updateOne])
+                    debuglog(`|... /:${ m.toLowerCase() }/updateOne`)
+                }
+                if (paths.indexOf('updateMany') > -1) {
+                    app.post(`/:${ m.toLowerCase() }/updateMany`, [authupdateMany, c.updateMany])
+                    debuglog(`|... /:${ m.toLowerCase() }/updateMany`)
+                }
+                if (paths.indexOf('deleteOne') > -1) {
+                    app.post(`/:${ m.toLowerCase() }/deleteOne`, [authdeleteOne, c.deleteOne])
+                    debuglog(`|... /:${ m.toLowerCase() }/deleteOne`)
+                }
+                if (paths.indexOf('deleteMany') > -1) {
+                    app.post(`/:${ m.toLowerCase() }/deleteMany`, [authdeleteMany, c.deleteMany])
+                    debuglog(`|... /:${ m.toLowerCase() }/deleteMany`)
+                }
+                if (paths.indexOf('aggregate') > -1) {
+                    app.post(`/:${ m.toLowerCase() }/aggregate`, [authaggregate, c.aggregate])
+                    debuglog(`|... /:${ m.toLowerCase() }/aggregate`)
+                }
             }
             index += 1
         }
@@ -432,17 +460,21 @@ class Server {
         return new Promise((resolve, reject) => {
             app.listen(this.currentPort, (err, res) => {
                 if (err) reject(err)
-                console.log('server listen', this.currentPort)
+                debuglog('server listen', this.currentPort)
             })
         })
     }
 }
 
-new Server()
-    .init()
-    .port(port || 3000)
-    .theme('default')
-    .routes()
-    .start()
-        .then(console.log)
-        .catch(console.error)
+if (!process.env.TESTING) {
+    new Server()
+        .init()
+        .port(parseInt(port || 3000))
+        .theme('default')
+        .routes()
+        .start()
+            .then(debuglog)
+            .catch(errorlog)
+}
+module.exports = Server
+

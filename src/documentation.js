@@ -1,7 +1,8 @@
 'use strict'
 
-const { factory, models } = require('./config')
-const { version, name, description, license, contacts: {email, website} } = require('./package.json')
+const { factory, models, documentation } = require('./config')
+let { servers } = documentation
+const { version, name, description, license, contacts: {email, website} } = require('../package.json')
 const p = [
     { name: 'find', method: 'POST', body: true },
     { name: 'findOne', method: 'POST', body: true },
@@ -13,11 +14,8 @@ const p = [
     { name: 'aggregate', method: 'POST', body: true } 
 ]
 
-const servers = [
-    {
-        url: 'http://localhost:5050/'
-    }
-]
+if (!servers) servers = 'http://localhost:5050'
+servers = servers.split(',').map(url => ({ url }))
 
 const info = {
     description,
@@ -41,7 +39,7 @@ const schemes = [
 const securityDefinitions = {
     api_key: {
         type: 'apiKey',
-        name: 'api_key',
+        name: 'x-api-key',
         in: 'header'
     }
 }

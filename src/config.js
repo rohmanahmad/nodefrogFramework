@@ -1,5 +1,16 @@
+'use strict'
+
+const x = require('dotenv').config({path: __dirname + '/.env'})
+const {
+    DOCS_SERVERS: servers,
+    APP_DEBUG_LEVEL: debug,
+    APP_PORT: port,
+    APP_BASE_URL: baseUrl
+} = process.env
+
 module.exports = {
     app: {
+        debug,
         session: {
             exp: '1h'
         },
@@ -7,7 +18,8 @@ module.exports = {
             type: 'aes-256-cbc',
             key: 'helloworld',
         },
-        port: 5050
+        baseUrl,
+        port
     },
     security: {
         auth: 'jwt'
@@ -41,7 +53,7 @@ module.exports = {
                     status: true,
                     routes: [
                         'find',
-                        'findOne',
+                        // 'findOne',
                         'create',
                         'updateOne',
                         'updateMany',
@@ -155,5 +167,8 @@ module.exports = {
                 ]
             }
         }
+    },
+    documentation: {
+        servers
     }
 }
