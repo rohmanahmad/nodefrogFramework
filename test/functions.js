@@ -1,7 +1,44 @@
 'use strict'
 
-const {join} = require('path')
+require('dotenv').config({path: __dirname + '/.env'})
+// const {join} = require('path')
+// const {requlre} = require('lodash')
 const superagent = require('superagent')
+
+const {
+    factory: {
+        models: {
+            Users: {
+                schema: modelUsers,
+                paths: userPaths
+            }
+        }
+    },
+    models
+} = require('../src/config')
+
+const credential = {
+    username: process.env.TEST_USERNAME,
+    password: process.env.TEST_PASSWORD
+}
+
+const schemas = {
+    Users: modelUsers,
+    // user defined models
+    Accounts: models['Accounts'].schema,
+    Categories: models['Categories'].schema,
+    Transaction: models['Transaction'].schema,
+    // end user defined models
+}
+
+const paths = {
+    Users: userPaths,
+    // user defined models
+    Accounts: models['Accounts'].paths,
+    Categories: models['Categories'].paths,
+    Transaction: models['Transaction'].paths,
+    // end user defined models
+}
 
 const sendRequest = async ({type, endpoint, form, query, headers}) => {
     try {
@@ -27,4 +64,14 @@ const sendRequest = async ({type, endpoint, form, query, headers}) => {
     }
 }
 
-module.exports = { sendRequest }
+const login = async function ({username, password}) {
+    const { body: { statusCode, data: { token } }, header } = await sendRequest({
+        type: 'post',
+        endpoint: '/authentication/login',
+        headers: { accept: 'application/json' },
+        form: { username, password }
+    })
+    return token
+}
+
+module.exports = { sendRequest, login, schemas, paths, credential }

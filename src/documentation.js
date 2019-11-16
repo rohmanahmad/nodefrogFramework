@@ -89,7 +89,7 @@ const paths = function () {
     }
     let index = 1
     for (let modelName in m) {
-        const {api, paths} = m[modelName]
+        const {api, paths, requiredFields} = m[modelName]
         if (api) {
             for (let pth of p) {
                 if (paths.indexOf(pth.name) > -1) {
@@ -100,33 +100,6 @@ const paths = function () {
                     }
                     let queries = []
                     const modelObj = m[modelName]['schema']
-                    for (const name in modelObj) {
-                        const o = {
-                            in: 'query',
-                            name,
-                            description: `[String] value of ${name}`,
-                            required: false
-                        }
-                        if (modelObj[name] === '<string>') {
-                            o['schema'] = {
-                                type: 'string'
-                            }
-                        } else if (modelObj[name] === '<number>') {
-                            o['schema'] = {
-                                type: 'number'
-                            }
-                        } else if (modelObj[name] === '<boolean>') {
-                            o['schema'] = {
-                                type: 'boolean'
-                            }
-                        } else {
-                            o['schema'] = {
-                                type: 'string',
-                                description: `[${modelObj[name]}] accepted.`
-                            }
-                        }
-                        queries.push(o)
-                    }
                     let requestBody = {
                         in: 'body',
                         description: 'Body',
@@ -138,8 +111,45 @@ const paths = function () {
                             criteria: 'object',
                             update: 'object'
                         }
+                        queries.push(requestBody)
+                    } else {
+                        for (const name in modelObj) {
+                            // debugger
+                            const required = requiredFields && requiredFields[pth.name] ? requiredFields[pth.name] : []
+                            const o = {
+                                in: 'query',
+                                name,
+                                description: `[String] value of ${name}`,
+                                required: required.indexOf(name) > -1
+                            }
+                            if (pth.name === 'create') o['in'] = 'formData'
+                            // debugger
+                            if (modelObj[name] === '<string>') {
+                                o['schema'] = {
+                                    type: 'string'
+                                }
+                            } else if (modelObj[name] === '<number>') {
+                                o['schema'] = {
+                                    type: 'number'
+                                }
+                            } else if (modelObj[name] === '<boolean>') {
+                                o['schema'] = {
+                                    type: 'boolean'
+                                }
+                            } else {
+                                o['schema'] = {
+                                    type: 'string',
+                                    description: `[${modelObj[name]}] accepted.`
+                                }
+                            }
+                            const isNotCreate = (pth.name !== 'create')
+                            const isNotId = (name !== '_id')
+                            console.log(pth.name, name, isNotCreate, isNotId)
+                            if (isNotCreate || isNotId) queries.push(o)
+                            // debugger
+                        }
                     }
-                    queries.push(requestBody)
+                    // debugger
                     let security = {}
                     if (m[modelName]['auth']['status']) {
                         if ((m[modelName]['auth']['routes']).indexOf(pth.name) > -1) security = { security: [{ 'api_key': [] }] }

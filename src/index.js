@@ -3,20 +3,34 @@
 const express = require('express')
 const bodyParser = require('body-parser')
 const crypto = require('crypto')
-const app = express()
 const mongoose = require('mongoose')
+
+const app = express()
 const Schema = mongoose.Schema
-const { app: { port, debug }, factory, models, db, app: { encryption: { type, key }, session: { exp } } } = require('./config')
+const { app: { port, debug, env }, factory, models, db, app: { encryption: { type, key }, session: { exp } } } = require('./config')
 const documentation = require('./documentation')
 app.disable('x-powered-by') // remove default header x-powered-by
 app.use(express.json()) // json parser
 app.use(express.urlencoded({ extended: true })) // for parsing application/x-www-form-urlencoded
-app.use(express.static(__dirname + '/swagger'))
-app.use(bodyParser.json())
+app.use(express.static(__dirname + '/swagger')) // static for documentation/swagger
+app.use(bodyParser.json()) // handling json raw
 
+const hashEncode = function (data) {
+    try {
+        const cipher = crypto.createCipher('des-ede3', (new Date().getTime()).toString())
+        let encrypted = cipher.update(data, 'utf8', 'hex')
+        encrypted += cipher.final('hex')
+        return encrypted.toLocaleLowerCase()
+    } catch (err) {
+        throw err
+    }
+}
 // set custom header
 app.use(function (req, res, next) {
     res.setHeader('x-powered-by', 'NodeFrog Framework')
+    req.config = {
+        processId: hashEncode(`${new Date().getTime()}`)
+    }
     next()
 })
 
@@ -31,22 +45,25 @@ else if (exp.indexOf('d') > -1) sessionLong = 60 * 60 * 24
 const sessionExp = sessionNumber * sessionLong
 // end session
 
+// mongoose debug mode actived when the environment not in production mode
+if (['development', 'uat', 'performance-test', 'stress-test'].indexOf(env) > -1) {
+    mongoose.set('debug', true)
+}
+
+// zona logger
 function debuglog (...data) {
     if (['E_ALL', 'E_ERR'].indexOf(debug) > -1) console.log(...data)
 }
 function errorlog (...data) {
     if (['E_ALL', 'E_ERR'].indexOf(debug) > -1) console.error(...data)
 }
+// end zona logger
+/* 
+ * class Hash => untuk kebutuhan encryption termasuk didalamnya 
+*/
 class Hash {
     des (data) {
-        try {
-            const cipher = crypto.createCipher('des-ede3', key)
-            let encrypted = cipher.update(data, 'utf8', 'hex')
-            encrypted += cipher.final('hex')
-            return encrypted
-        } catch (err) {
-            throw err
-        }
+        return hashEncode(data)
     }
     encode (data) {
         try {
@@ -69,8 +86,13 @@ class Hash {
         }
     }
 }
-
+/* 
+ * class ModelControls => untuk kebutuhan controlling models yg sudah di definisikan
+*/
 class ModelControls {
+    /* 
+    * getFormatSchema -> digunakan untuk mengambil dan mensetting tipe data dari setiap field dalam sebuah schema model
+    */
     getFormatSchema (sc) {
         let schema = {}
         for (let s in sc) {
@@ -81,29 +103,47 @@ class ModelControls {
         }
         return schema
     }
+    /* 
+    * register -> untuk meregistrasi semua config model yg sudah di definisikan pada config.js
+    *             baik dari user defined maupun factory.
+    */
     register () {
+        // registrasi model yg sudah anda definisikan
         for (let m in models) {
             const sch = new Schema(this.getFormatSchema(models[m]['schema']))
             mongoose.model(m, sch, m.toLowerCase())
         }
+        // registrasi model bawaan/factory sudah definisikan
         for (let m in factory.models) {
             const sch = new Schema(this.getFormatSchema(factory.models[m]['schema']))
             mongoose.model(m, sch, m.toLowerCase())
         }
     }
 }
-
+/* 
+ * class Database => untuk kebutuhan Database connection dan segala yg berhubungan dengan database
+*/
 class Database extends ModelControls {
     constructor () {
         super()
         this.checkConnection()
     }
+    /* 
+     * connect -> digunakan untuk mengkoneksikan api dengan database
+     *  - semua config dapat disetting secara manual pada config.js pada bagian db.mongo    
+    */
     connect () {
         if (!db.mongo) throw 'Invalid Mongodb URI Config!'
         mongoose
             .connect(db.mongo, { keepAlive: 1, useNewUrlParser: true, useUnifiedTopology: true })
             .catch(errorlog)
     }
+    /*
+     * checkConnection -> dipanggil pada constructor, sehingga semua query yang akan dilakukan
+     *                    akan melakukan pengecekan koneksi ke server database.
+     *   - bila koneksi putus/closed maka akan otomatis memanggil fungsi connect()
+     * 
+    */
     checkConnection () {
         if (mongoose.connection.readyState === 0) this.connect()
         mongoose.connection
@@ -124,20 +164,27 @@ class Database extends ModelControls {
             })
     }
 }
-
-const modelMapping = {
+/* 
+ * aliases => berfungsi sebagai alias dari model/ bisa dibilang 
+*/
+const aliases = {
     users: 'Users',
     accounts: 'Accounts',
     categories: 'Categories',
     transaction: 'Transaction'
 }
+/* 
+ * model => tujuannya untuk mencari model yg sudah di mapping pada variable alias
+*/
 function model (m) {
-    m = modelMapping[m]
+    m = aliases[m]
     const models = mongoose.models
     if (models[m]) return models[m]
     throw 'Model Not Found'
 }
-
+/* 
+ * validateQueries => digunakan untuk memvalidasi semua query yg masuk dan akan di validasi sesuai dengan yang terdefinisi pada config/documentation
+*/
 function validateQueries (queries = {}) {
     let valid = {}
     let {limit, page, objectId, upsert} = queries
@@ -165,10 +212,13 @@ function validateQueries (queries = {}) {
     }
     return valid
 }
-
+/* 
+ * authentication => digunakan untuk mengaktifkan fungsi auth dari setiap request yg dituju.
+*/
 function authentication (req, res, next) {
     try {
-        debuglog(req.header('api_key'))
+        const token = req.header('x-api-key') || req.query['x-token']
+        if (!token) throw new Error('The Token Required For This Endpoint')
         next()
     } catch (err) {
         res.status(402).send({
@@ -178,7 +228,9 @@ function authentication (req, res, next) {
         })
     }
 }
-
+/* 
+ * class Controllers => digunakan untuk mengontrol semua fungsi yg dipanggil dari setiap rute yang terdaftar.
+*/
 class Controllers {
     async login (req, res, next) {
         try {
@@ -224,8 +276,14 @@ class Controllers {
             let {limit, skip, page} = validateQueries(req.query)
             const query = req.body || {}
             const m = model(req.params[mdl])
-            const items = await m.find(query).skip(skip).limit(limit)
-            res.send({ statusCode: 200, config: {limit, page, query}, items })
+            let items = await m.find(query).skip(skip).limit(limit)
+            if (req.params[mdl] === 'users') {
+                items = items.map(x => {
+                    x.password = '[hidden]'
+                    return x
+                })
+            }
+            res.send({ statusCode: 200, config: {processId: req.config.processId, query: {limit, page, query}}, items })
         } catch (err) {
             res.status(400).send({
                 statusCode: 400,
@@ -359,12 +417,16 @@ class Controllers {
         }
     }
 }
-
+/* 
+ * passAuth => fungsi yang digunakan untuk bypass semua authentikasi
+*/
 function passAuth (req, res, next) {
     debuglog('|.. passing authentication')
     next()
 }
-
+/* 
+ * class Server => berisi semua fungsi untuk kebutuhan server
+*/
 class Server {
     init () {
         this.currentPort = 3000
@@ -379,6 +441,9 @@ class Server {
     theme (theme) {
         this.currentTheme = theme || 'default'
         return this
+    }
+    isSecure (authRoutes, key) {
+        return authRoutes.indexOf(key) > -1
     }
     routes () {
         const c = new Controllers()
@@ -404,46 +469,46 @@ class Server {
 
                 const authRoutes = allModels[m]['auth']['routes']
                 const paths = allModels[m]['paths']
-                let authfind = (authRoutes.indexOf('find') > -1) ? authentication : passAuth
-                let authfindOne = (authRoutes.indexOf('findOne') > -1) ? authentication : passAuth
-                let authcreate = (authRoutes.indexOf('create') > -1) ? authentication : passAuth
-                let authupdateOne = (authRoutes.indexOf('updateOne') > -1) ? authentication : passAuth
-                let authupdateMany = (authRoutes.indexOf('updateMany') > -1) ? authentication : passAuth
-                let authdeleteOne = (authRoutes.indexOf('deleteOne') > -1) ? authentication : passAuth
-                let authdeleteMany = (authRoutes.indexOf('deleteMany') > -1) ? authentication : passAuth
-                let authaggregate = (authRoutes.indexOf('aggregate') > -1) ? authentication : passAuth
+                let authfind = (this.isSecure(authRoutes, 'find')) ? authentication : passAuth
+                let authfindOne = (this.isSecure(authRoutes, 'findOne')) ? authentication : passAuth
+                let authcreate = (this.isSecure(authRoutes, 'create')) ? authentication : passAuth
+                let authupdateOne = (this.isSecure(authRoutes, 'updateOne')) ? authentication : passAuth
+                let authupdateMany = (this.isSecure(authRoutes, 'updateMany')) ? authentication : passAuth
+                let authdeleteOne = (this.isSecure(authRoutes, 'deleteOne')) ? authentication : passAuth
+                let authdeleteMany = (this.isSecure(authRoutes, 'deleteMany')) ? authentication : passAuth
+                let authaggregate = (this.isSecure(authRoutes, 'aggregate')) ? authentication : passAuth
 
                 if (paths.indexOf('find') > -1) {
-                    debuglog(`|... /:${ m.toLowerCase() }/findOne`)
                     app.post(`/:${ m.toLowerCase() }/find`, [authfind, c.find])
+                    debuglog(`|... /:${ m.toLowerCase() }/findOne`, this.isSecure(authRoutes, 'find') ? '@secure-route' : 'pass')
                 }
                 if (paths.indexOf('findOne') > -1) {
                     app.post(`/:${ m.toLowerCase() }/findOne`, [authfindOne, c.findOne])
-                    debuglog(`|... /:${ m.toLowerCase() }/findOne`)
+                    debuglog(`|... /:${ m.toLowerCase() }/findOne`, this.isSecure(authRoutes, 'findOne') ? '@secure-route' : 'pass')
                 }
                 if (paths.indexOf('create') > -1) {
                     app.post(`/:${ m.toLowerCase() }/create`, [authcreate, c.create])
-                    debuglog(`|... /:${ m.toLowerCase() }/create`)
+                    debuglog(`|... /:${ m.toLowerCase() }/create`, this.isSecure(authRoutes, 'create') ? '@secure-route' : 'pass')
                 }
                 if (paths.indexOf('updateOne') > -1) {
                     app.post(`/:${ m.toLowerCase() }/updateOne`, [authupdateOne, c.updateOne])
-                    debuglog(`|... /:${ m.toLowerCase() }/updateOne`)
+                    debuglog(`|... /:${ m.toLowerCase() }/updateOne`, this.isSecure(authRoutes, 'updateOne') ? '@secure-route' : 'pass')
                 }
                 if (paths.indexOf('updateMany') > -1) {
                     app.post(`/:${ m.toLowerCase() }/updateMany`, [authupdateMany, c.updateMany])
-                    debuglog(`|... /:${ m.toLowerCase() }/updateMany`)
+                    debuglog(`|... /:${ m.toLowerCase() }/updateMany`, this.isSecure(authRoutes, 'updateMany') ? '@secure-route' : 'pass')
                 }
                 if (paths.indexOf('deleteOne') > -1) {
                     app.post(`/:${ m.toLowerCase() }/deleteOne`, [authdeleteOne, c.deleteOne])
-                    debuglog(`|... /:${ m.toLowerCase() }/deleteOne`)
+                    debuglog(`|... /:${ m.toLowerCase() }/deleteOne`, this.isSecure(authRoutes, 'deleteOne') ? '@secure-route' : 'pass')
                 }
                 if (paths.indexOf('deleteMany') > -1) {
                     app.post(`/:${ m.toLowerCase() }/deleteMany`, [authdeleteMany, c.deleteMany])
-                    debuglog(`|... /:${ m.toLowerCase() }/deleteMany`)
+                    debuglog(`|... /:${ m.toLowerCase() }/deleteMany`, this.isSecure(authRoutes, 'deleteMany') ? '@secure-route' : 'pass')
                 }
                 if (paths.indexOf('aggregate') > -1) {
                     app.post(`/:${ m.toLowerCase() }/aggregate`, [authaggregate, c.aggregate])
-                    debuglog(`|... /:${ m.toLowerCase() }/aggregate`)
+                    debuglog(`|... /:${ m.toLowerCase() }/aggregate`, this.isSecure(authRoutes, 'aggregate') ? '@secure-route' : 'pass')
                 }
             }
             index += 1
@@ -466,7 +531,7 @@ class Server {
     }
 }
 
-if (!process.env.TESTING) {
+if (!process.env.TEST) {
     new Server()
         .init()
         .port(parseInt(port || 3000))
@@ -475,6 +540,6 @@ if (!process.env.TESTING) {
         .start()
             .then(debuglog)
             .catch(errorlog)
+} else {
+    module.exports = Server
 }
-module.exports = Server
-

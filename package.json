@@ -4,7 +4,9 @@
   "description": "nodejs blogs",
   "main": "index.js",
   "scripts": {
-    "start": "nodemon --watch src --watch package.json -x node src/index.js",
+    "start": "node src/index.js",
+    "dev": "nodemon --watch src --watch package.json -x node src/index.js",
+    "debug": "node --inspect src/index.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "author": "rohmanahmad",

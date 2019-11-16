@@ -1,16 +1,13 @@
 'use strict'
 
-const x = require('dotenv').config({path: __dirname + '/.env'})
-const {
-    DOCS_SERVERS: servers,
-    APP_DEBUG_LEVEL: debug,
-    APP_PORT: port,
-    APP_BASE_URL: baseUrl
-} = process.env
+if (!process.env.TEST) require('dotenv').config({path: __dirname + '/.env'})
+function getEnv (key, defaultValue = '') {
+    return process.env[key] || defaultValue
+}
 
 module.exports = {
     app: {
-        debug,
+        debug: getEnv('APP_DEBUG_LEVEL'),
         session: {
             exp: '1h'
         },
@@ -18,8 +15,9 @@ module.exports = {
             type: 'aes-256-cbc',
             key: 'helloworld',
         },
-        baseUrl,
-        port
+        baseUrl: getEnv('APP_BASE_URL'),
+        port: getEnv('APP_PORT'),
+        env: getEnv('APP_ENV', 'production')
     },
     security: {
         auth: 'jwt'
@@ -33,6 +31,7 @@ module.exports = {
             Users: {
                 api: true,
                 schema: {
+                    _id: '<objectId>',
                     email: '<string>',
                     username: '<string>',
                     password: '<string>',
@@ -40,20 +39,72 @@ module.exports = {
                     status: '<number>'
                 },
                 paths: [
-                    // 'find',
+                    'find',
                     'findOne',
-                    // 'create',
+                    'create',
                     'updateOne',
                     // 'updateMany',
                     'deleteOne',
                     // 'deleteMany',
-                    // 'aggregate'
+                    'aggregate'
+                ], 
+                requiredFields: {
+                    'find': [],
+                    'findOne': [],
+                    'create': ['username', 'email', 'password', 'fullname'],
+                    'updateOne': ['_id'],
+                    'updateMany': [],
+                    'deleteOne': ['_id'],
+                    'deleteMany': []
+                },
+                auth: {
+                    status: true,
+                    routes: [
+                        'find',
+                        'findOne',
+                        'create',
+                        'updateOne',
+                        'updateMany',
+                        'deleteOne',
+                        'deleteMany',
+                        'aggregate'
+                    ]
+                }
+            },
+            ACL: {
+                api: true,
+                schema: {
+                    _id: '<objectId>',
+                    username: '<string>',
+                    accessType: '<string>',
+                    accessObject: '<string>',
+                    description: '<string>',
+                    status: '<number>'
+                },
+                requiredFields: {
+                    'find': [],
+                    'findOne': [],
+                    'create': ['username', 'accessType', 'accessObject', 'description'],
+                    'updateOne': ['_id'],
+                    'updateMany': [],
+                    'deleteOne': ['_id'],
+                    'deleteMany': ['username']
+                },
+                paths: [
+                    'find',
+                    'findOne',
+                    'create',
+                    'updateOne',
+                    'updateMany',
+                    'deleteOne',
+                    'deleteMany',
+                    'aggregate'
                 ], 
                 auth: {
                     status: true,
                     routes: [
                         'find',
-                        // 'findOne',
+                        'findOne',
                         'create',
                         'updateOne',
                         'updateMany',
@@ -69,7 +120,7 @@ module.exports = {
         Accounts: {
             api: true, // true: publish api, false: disable api
             schema: {
-                accountId: '<objectId>',
+                _id: '<objectId>',
                 groupId: '<objectId>',
                 accountName: '<string>',
                 total: '<number>',
@@ -77,15 +128,24 @@ module.exports = {
                 status: '<number>'
             },
             paths: [
-                // 'find',
-                // 'findOne',
-                // 'create',
-                // 'updateOne',
+                'find',
+                'findOne',
+                'create',
+                'updateOne',
                 // 'updateMany',
-                // 'deleteOne',
+                'deleteOne',
                 // 'deleteMany',
                 'aggregate'
-            ], 
+            ],
+            requiredFields: {
+                'find': [],
+                'findOne': [],
+                'create': ['groupId', 'accountName', 'total', 'isIncludeTotal'],
+                'updateOne': ['_id'],
+                'updateMany': [],
+                'deleteOne': ['_id'],
+                'deleteMany': ['username']
+            },
             auth: {
                 status: true, // false : disabled
                 routes: [
@@ -103,7 +163,7 @@ module.exports = {
         Categories: {
             api: true,
             schema: {
-                categoryId: '<objectId>',
+                _id: '<objectId>',
                 categoryName: '<string>',
                 categoryType: '<string>',
                 status: '<number>'
@@ -113,11 +173,20 @@ module.exports = {
                 'findOne',
                 'create',
                 'updateOne',
-                'updateMany',
+                // 'updateMany',
                 'deleteOne',
-                'deleteMany',
+                // 'deleteMany',
                 'aggregate'
-            ], 
+            ],
+            requiredFields: {
+                'find': [],
+                'findOne': [],
+                'create': ['categoryName', 'categoryType'],
+                'updateOne': ['_id'],
+                'updateMany': [],
+                'deleteOne': ['_id'],
+                'deleteMany': ['username']
+            },
             auth: {
                 status: true, // false : disabled
                 routes: [
@@ -148,11 +217,20 @@ module.exports = {
                 'findOne',
                 'create',
                 'updateOne',
-                'updateMany',
+                // 'updateMany',
                 'deleteOne',
-                'deleteMany',
+                // 'deleteMany',
                 'aggregate'
-            ], 
+            ],
+            requiredFields: {
+                'find': [],
+                'findOne': [],
+                'create': ['fromAccountId', 'toAccountId', 'categoryId', 'transactionType', 'nominal'],
+                'updateOne': ['_id'],
+                'updateMany': [],
+                'deleteOne': ['_id'],
+                'deleteMany': ['username']
+            },
             auth: {
                 status: true, // false : disabled
                 routes: [
@@ -169,6 +247,6 @@ module.exports = {
         }
     },
     documentation: {
-        servers
+        servers: getEnv('DOCS_SERVERS')
     }
 }

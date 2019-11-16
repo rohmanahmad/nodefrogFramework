@@ -21,4 +21,20 @@ describe('Login Scenario', function () {
             }
         })
     })
+    describe('- Gagal', function () {
+        it('harusnya return 400 dengan response statusCode & message', async () => {
+            try {
+                const { body: { statusCode, message }, header } = await sendRequest({
+                    type: 'post',
+                    endpoint: '/authentication/login',
+                    headers: { accept: 'application/json' },
+                    form: { username: usernameTest, password: passwordTest }
+                })
+                assert(statusCode, 400)
+                assert((message || message !== ''), true)
+            } catch (err) {
+                throw err
+            }
+        })
+    })
 })
