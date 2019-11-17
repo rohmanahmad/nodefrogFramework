@@ -1,6 +1,6 @@
 'use strict'
 
-const { factory, models, documentation } = require('./config')
+const { factory, models, documentation, security: {enabled: authEnabled} } = require('./config')
 let { servers } = documentation
 const { version, name, description, license, contacts: {email, website} } = require('../package.json')
 const p = [
@@ -85,6 +85,45 @@ const paths = function () {
                 ],
                 ...response
             }
+        },
+        '/authentication/register': {
+            'post': {
+                tags: ['Auth'],
+                summary: 'register',
+                parameters: [
+                    {
+                        name: 'email',
+                        in: 'formData',
+                        description: 'email',
+                        required: true
+                    },
+                    {
+                        name: 'firsname',
+                        in: 'formData',
+                        description: 'firsname',
+                        required: true
+                    },
+                    {
+                        name: 'lastname',
+                        in: 'formData',
+                        description: 'lastname',
+                        required: true
+                    },
+                    {
+                        name: 'username',
+                        in: 'formData',
+                        description: 'username',
+                        required: true
+                    },
+                    {
+                        name: 'password',
+                        in: 'formData',
+                        description: 'password',
+                        required: true
+                    }
+                ],
+                ...response
+            }
         }
     }
     let index = 1
@@ -143,15 +182,15 @@ const paths = function () {
                                 }
                             }
                             const isNotCreate = (pth.name !== 'create')
-                            const isNotId = (name !== '_id')
-                            console.log(pth.name, name, isNotCreate, isNotId)
-                            if (isNotCreate || isNotId) queries.push(o)
+                            const isNotId = (['_id', 'createdAt', 'updatedAt'].indexOf(name) < 0)
+                            // console.log(pth.name, name, isNotCreate, isNotId)
+                            if (isNotCreate && isNotId) queries.push(o)
                             // debugger
                         }
                     }
                     // debugger
                     let security = {}
-                    if (m[modelName]['auth']['status']) {
+                    if (authEnabled && m[modelName]['auth']['status']) {
                         if ((m[modelName]['auth']['routes']).indexOf(pth.name) > -1) security = { security: [{ 'api_key': [] }] }
                     }
                     cPath[method] = {
@@ -161,6 +200,7 @@ const paths = function () {
                         ...security,
                         ...response
                     }
+                    // debugger
                     objPath[`/${modelName.toLowerCase()}/${pth.name}`] = cPath
                 }
             }

@@ -7,7 +7,7 @@ const mongoose = require('mongoose')
 
 const app = express()
 const Schema = mongoose.Schema
-const { app: { port, debug, env }, factory, models, db, app: { encryption: { type, key }, session: { exp } } } = require('./config')
+const { app: { port, debug, env }, factory, models, db, app: { encryption: { type, key }, session: { exp } }, security: { acl, enabled: authEnabled } } = require('./config')
 const documentation = require('./documentation')
 app.disable('x-powered-by') // remove default header x-powered-by
 app.use(express.json()) // json parser
@@ -86,6 +86,61 @@ class Hash {
         }
     }
 }
+/* class Services => untuk membantu logic2 yg lebih komplex */
+class Services {
+    isValidEmail (email) {
+        if (!email) return false
+        if (email && email.length < 5) return false
+        if (email && email.indexOf('@') < 2) return false
+        return true
+    }
+    async checkExistsUser ({username, email}) {
+        try {
+            const m = model('users')
+            const exists = await m.findOne({
+                $or: [
+                    {
+                        username
+                    },
+                    {
+                        email
+                    }
+                ]
+            })
+            if (exists) throw new Error('User or Email Already Exists')
+        } catch (err) {
+            throw err
+        }
+    }
+    async validateUserRegister ({username, email, firstname, lastname, password}) {
+        try {
+            // check all input are valid
+            if (!username || (username && username.length < 5)) throw new Error('Invalid Username. Min 5 Characters.')
+            if (!this.isValidEmail(email)) throw new Error('Invalid Email')
+            if (!firstname || (firstname && firstname.length < 1)) throw new Error('Invalid First Name.')
+            if (!lastname || (lastname && lastname.length < 1)) throw new Error('Invalid Last Name.')
+            if (!password || (password && password.length < 6)) throw new Error('Invalid Password or Password Too Weak.')
+            await this.checkExistsUser({email, username})
+            const code = `${new Date().getTime() + new Date().getHours() + new Date().getDay()}`.substr(7, 6)
+            // debugger
+            return {
+                email,
+                username,
+                firstname,
+                lastname,
+                password: new Hash().encode(password),
+                createdAt: new Date(),
+                updatedAt: null,
+                isVerified: false,
+                activeUntil: new Date(new Date().getTime() + (15 * 24 * 60 * 60 * 1000)), // 15hari trial
+                verificationCode: `NF-${code}`,
+                status: 0
+            }
+        } catch (err) {
+            throw err
+        }
+    }
+}
 /* 
  * class ModelControls => untuk kebutuhan controlling models yg sudah di definisikan
 */
@@ -98,6 +153,7 @@ class ModelControls {
         for (let s in sc) {
             let type = String
             if (sc[s] === '<number>') type = Number
+            if (sc[s] === '<date>') type = Date
             if (sc[s] === '<objectId>') type = mongoose.Types.ObjectId
             schema[s] = type
         }
@@ -168,6 +224,7 @@ class Database extends ModelControls {
  * aliases => berfungsi sebagai alias dari model/ bisa dibilang 
 */
 const aliases = {
+    acl: 'ACL',
     users: 'Users',
     accounts: 'Accounts',
     categories: 'Categories',
@@ -228,6 +285,19 @@ function authentication (req, res, next) {
         })
     }
 }
+function authAccessControll (req, res, next) {
+    try {
+
+    } catch (err) {
+        res
+            .status(403)
+            .send({
+                statusCode: 403,
+                message: 'Not Permitted',
+                error: err.message
+            })
+    }
+}
 /* 
  * class Controllers => digunakan untuk mengontrol semua fungsi yg dipanggil dari setiap rute yang terdaftar.
 */
@@ -237,11 +307,30 @@ class Controllers {
             const error = 'Invalid Username or Password'
             let { username, password } = req.body
             if (!username || (username && username.length === '')) throw new Error(error)
-            const m = model('users')
-            let information = await m.findOne({
-                username,
-                status: 1
-            })
+            const usersModel = model('users')
+            let information = null
+            if (acl) {
+                information = await usersModel.aggregate([
+                    {
+                        $match: {
+                            username,
+                            status: 1
+                        }
+                    }, {
+                        $lookup: {
+                            from: 'acl',
+                            localField: '_id',
+                            foreignField: 'userId',
+                            as: 'access'
+                        }
+                    }
+                ])
+            } else {
+                information = await usersModel.findOne({
+                    username,
+                    status: 1
+                })
+            }
             if (!information) throw new Error(error)
             if (password !== new Hash().decode(information.password)) throw new Error(error)
             const ttl = new Date().getTime() + sessionExp
@@ -263,6 +352,22 @@ class Controllers {
             })
         } catch (err) {
             errorlog(err)
+            res.status(400).send({
+                statusCode: 400,
+                message: 'bad request',
+                error: err.message || err
+            })
+        }
+    }
+    async register (req, res, next) {
+        try {
+            const body = req.body || {}
+            const m = model('users')
+            const data = await new Services().validateUserRegister(body)
+            // console.log(data)
+            let item = await m.create(body)
+            res.send({ statusCode: 200, config: {data} })
+        } catch (err) {
             res.status(400).send({
                 statusCode: 400,
                 message: 'bad request',
@@ -443,7 +548,7 @@ class Server {
         return this
     }
     isSecure (authRoutes, key) {
-        return authRoutes.indexOf(key) > -1
+        return authEnabled && authRoutes.indexOf(key) > -1
     }
     routes () {
         const c = new Controllers()
@@ -461,6 +566,7 @@ class Server {
             res.send(documentation.paths)
         })
         app.post('/authentication/login', c.login)
+        app.post('/authentication/register', c.register)
         const allModels = {...factory.models, ...models}
         let index = 1
         for (let m in allModels) {

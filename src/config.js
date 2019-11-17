@@ -20,7 +20,9 @@ module.exports = {
         env: getEnv('APP_ENV', 'production')
     },
     security: {
-        auth: 'jwt'
+        enabled: false,
+        auth: 'jwt',
+        acl: true,
     },
     db: {
         mongo: 'mongodb://localhost:27017/blogs'
@@ -31,11 +33,17 @@ module.exports = {
             Users: {
                 api: true,
                 schema: {
-                    _id: '<objectId>',
+                    // _id: '<objectId>',
                     email: '<string>',
                     username: '<string>',
                     password: '<string>',
-                    fullname: '<string>',
+                    firstname: '<string>',
+                    lastname: '<string>',
+                    activeUntil: '<date>',
+                    verificationCode: '<string>',
+                    createdAt: '<date>',
+                    updatedAt: '<date>',
+                    isVerified: '<boolean>',
                     status: '<number>'
                 },
                 paths: [
@@ -75,7 +83,7 @@ module.exports = {
                 api: true,
                 schema: {
                     _id: '<objectId>',
-                    username: '<string>',
+                    userId: '<objectId>',
                     accessType: '<string>',
                     accessObject: '<string>',
                     description: '<string>',
